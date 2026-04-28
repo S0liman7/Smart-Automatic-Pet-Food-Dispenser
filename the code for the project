@@ -1,0 +1,87 @@
+#include <Servo.h>
+
+ 
+const int TRIG1    = 2;   // Left HC-SR04 – Trigger
+const int ECHO1    = 3;   // Left HC-SR04 – Echo
+const int TRIG2    = 4;   // Right HC-SR04 – Trigger
+const int ECHO2    = 5;   // Right HC-SR04 – Echo
+const int SERVO_PIN = 9;  // Servo motor signal
+
+
+const int DETECT_DISTANCE = 20; // cm - detection threshold
+const int OPEN_ANGLE      = 90; // degrees - servo open position
+const int CLOSE_ANGLE     = 0;  // degrees - servo closed position
+const unsigned long DISPENSE_DURATION = 2000; // ms food is dispensed
+const unsigned long COOLDOWN          = 5000; // ms before re-trigger
+
+
+enum State { IDLE, DISPENSING, COOLDOWN_STATE };
+State currentState = IDLE;
+
+
+unsigned long stateStartTime = 0;
+
+Servo feederServo;
+
+
+long measureDistance(int trigPin, int echoPin) {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  long duration = pulseIn(echoPin, HIGH, 30000); // 30ms timeout
+  return duration * 0.0343 / 2; // convert to cm
+}
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(TRIG1, OUTPUT); pinMode(ECHO1, INPUT);
+  pinMode(TRIG2, OUTPUT); pinMode(ECHO2, INPUT);
+  feederServo.attach(SERVO_PIN);
+  feederServo.write(CLOSE_ANGLE); // start closed
+  delay(500);
+  Serial.println("Smart Pet Feeder Ready!");
+}
+
+void loop() {
+  long d1 = measureDistance(TRIG1, ECHO1);
+  long d2 = measureDistance(TRIG2, ECHO2);
+  bool petDetected = (d1 > 0 && d1 <= DETECT_DISTANCE) ||
+                     (d2 > 0 && d2 <= DETECT_DISTANCE);
+
+  unsigned long now = millis();
+
+  switch (currentState) {
+
+    case IDLE:
+      if (petDetected) {
+        feederServo.write(OPEN_ANGLE);
+        stateStartTime = now;
+        currentState = DISPENSING;
+        Serial.println("Pet detected – dispensing food!");
+      }
+      break;
+
+    case DISPENSING:
+      if (now - stateStartTime >= DISPENSE_DURATION) {
+        feederServo.write(CLOSE_ANGLE);
+        stateStartTime = now;
+        currentState = COOLDOWN_STATE;
+        Serial.println("Dispensing done – cooldown started.");
+      }
+      break;
+
+    case COOLDOWN_STATE:
+      if (now - stateStartTime >= COOLDOWN) {
+        currentState = IDLE;
+        Serial.println("Cooldown complete – ready.");
+      }
+      break;
+  }
+
+  Serial.print("D1: "); Serial.print(d1);
+  Serial.print(" cm | D2: "); Serial.print(d2);
+  Serial.println(" cm");
+  delay(100);
+}
